@@ -20,6 +20,11 @@
   "autoload-dev": {
     "psr-4": { "Errorgap\\Tests\\": "tests/" }
   },
+  "extra": {
+    "branch-alias": {
+      "dev-main": "0.1.x-dev"
+    }
+  },
   "config": {
     "sort-packages": true
   },
