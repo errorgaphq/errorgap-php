@@ -4,7 +4,7 @@
   "type": "library",
   "license": "MIT",
   "keywords": ["errorgap", "error-tracking", "exceptions", "monitoring"],
-  "homepage": "https://gitlab.jgrubbs.net/jGRUBBS/errorgap-php",
+  "homepage": "https://github.com/errorgaphq/errorgap-php",
   "authors": [{ "name": "Errorgap" }],
   "require": {
     "php": "^8.1",
