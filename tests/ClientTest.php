@@ -19,6 +19,7 @@ final class ClientTest extends TestCase
                 'projectSlug' => 'demo',
                 'apiKey' => 'flk_test',
                 'async' => false,
+                'timeoutSeconds' => 30,
             ]);
             $client = new Client($config);
 
@@ -63,6 +64,7 @@ final class ClientTest extends TestCase
                 'projectSlug' => 'demo',
                 'apiKey' => 'flk_test',
                 'async' => false,
+                'timeoutSeconds' => 30,
             ]);
             $client = new Client($config);
 
