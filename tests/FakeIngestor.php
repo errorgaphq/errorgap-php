@@ -78,6 +78,7 @@ final class FakeIngestor
         if ($client === false) {
             throw new \RuntimeException('Ingestor accept timed out');
         }
+        stream_set_timeout($client, $timeoutSeconds);
 
         $request = '';
         $headerEnd = false;
@@ -122,7 +123,10 @@ final class FakeIngestor
         $contentLength = isset($headers['content-length']) ? (int)$headers['content-length'] : 0;
 
         while (strlen($body) < $contentLength && !feof($client)) {
-            $chunk = fread($client, 4096);
+            // Ask for exactly the bytes still owed: PHP < 8.3 fread() blocks
+            // trying to fill the full requested length on sockets, deadlocking
+            // against a client that has already sent everything.
+            $chunk = fread($client, min(4096, $contentLength - strlen($body)));
             if ($chunk === false) {
                 break;
             }
