@@ -107,4 +107,65 @@ final class ClientTest extends TestCase
             $ingestor->close();
         }
     }
+
+    public function testPostsApmTransactionWhenEnabled(): void
+    {
+        $ingestor = new FakeIngestor();
+        try {
+            $config = new Configuration([
+                'endpoint' => $ingestor->endpoint(),
+                'projectSlug' => 'demo',
+                'apiKey' => 'flk_test',
+                'environment' => 'testing',
+                'async' => false,
+                'apmEnabled' => true,
+                'apmSampleRate' => 1.0,
+                'timeoutSeconds' => 30,
+            ]);
+            $client = new Client($config);
+
+            $pid = pcntl_fork();
+            if ($pid === 0) {
+                $ingestor->acceptOne();
+                exit(0);
+            }
+            usleep(20_000);
+
+            $result = $client->notifyTransaction([
+                'kind' => 'web',
+                'method' => 'GET',
+                'path' => '/orders/{order}',
+                'path_raw' => '/orders/42',
+                'status_code' => 200,
+                'duration_ms' => 12.5,
+            ], sync: true);
+            $this->assertSame(201, $result->status);
+
+            pcntl_waitpid($pid, $status);
+            $captured = $ingestor->lastRequest();
+            $this->assertNotNull($captured);
+            $this->assertSame('/api/projects/demo/transactions', $captured['path']);
+            $this->assertSame('web', $captured['body']['kind']);
+            $this->assertSame('testing', $captured['body']['environment']);
+            $this->assertSame([], $captured['body']['spans']);
+        } finally {
+            $ingestor->close();
+        }
+    }
+
+    public function testSkipsApmWhenDisabledOrSampleRateIsZero(): void
+    {
+        $disabled = new Client(new Configuration([
+            'projectSlug' => 'demo',
+            'apmEnabled' => false,
+        ]));
+        $sampledOut = new Client(new Configuration([
+            'projectSlug' => 'demo',
+            'apmEnabled' => true,
+            'apmSampleRate' => 0.0,
+        ]));
+
+        $this->assertSame(204, $disabled->notifyTransaction(['kind' => 'web'])->status);
+        $this->assertSame(204, $sampledOut->notifyTransaction(['kind' => 'web'])->status);
+    }
 }

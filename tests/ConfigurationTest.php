@@ -13,7 +13,7 @@ final class ConfigurationTest extends TestCase
 
     protected function setUp(): void
     {
-        foreach (['ERRORGAP_ENDPOINT', 'ERRORGAP_PROJECT_SLUG', 'ERRORGAP_PROJECT_ID', 'ERRORGAP_API_KEY'] as $key) {
+        foreach (['ERRORGAP_ENDPOINT', 'ERRORGAP_PROJECT_SLUG', 'ERRORGAP_PROJECT_ID', 'ERRORGAP_API_KEY', 'ERRORGAP_APM_ENABLED', 'ERRORGAP_APM_SAMPLE_RATE'] as $key) {
             $this->originalEnv[$key] = getenv($key);
             putenv($key);
         }
@@ -37,6 +37,8 @@ final class ConfigurationTest extends TestCase
         $this->assertTrue($config->async);
         $this->assertContains('password', $config->filterKeys);
         $this->assertContains('authorization', $config->filterKeys);
+        $this->assertFalse($config->apmEnabled);
+        $this->assertSame(1.0, $config->apmSampleRate);
     }
 
     public function testReadsEnvironmentVariables(): void
@@ -45,11 +47,15 @@ final class ConfigurationTest extends TestCase
         putenv('ERRORGAP_PROJECT_SLUG=demo');
         putenv('ERRORGAP_PROJECT_ID=p_123');
         putenv('ERRORGAP_API_KEY=flk_test');
+        putenv('ERRORGAP_APM_ENABLED=true');
+        putenv('ERRORGAP_APM_SAMPLE_RATE=0.25');
         $config = new Configuration();
         $this->assertSame('https://errorgap.example.com', $config->endpoint);
         $this->assertSame('demo', $config->projectSlug);
         $this->assertSame('p_123', $config->projectId);
         $this->assertSame('flk_test', $config->apiKey);
+        $this->assertTrue($config->apmEnabled);
+        $this->assertSame(0.25, $config->apmSampleRate);
     }
 
     public function testExplicitOptionsOverrideEnv(): void

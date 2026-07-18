@@ -64,12 +64,61 @@ class Client
     }
 
     /**
+     * Deliver one APM web or job transaction.
+     *
+     * @param array<string, mixed> $transaction
+     */
+    public function notifyTransaction(array $transaction, bool $sync = false): DeliveryResult
+    {
+        if (!$this->configuration->apmEnabled || !$this->shouldSampleApm()) {
+            return new DeliveryResult(status: 204);
+        }
+
+        try {
+            $this->configuration->validate();
+            $payload = array_merge([
+                'environment' => $this->configuration->environment,
+                'occurred_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                'spans' => [],
+            ], $transaction);
+        } catch (\Throwable $caught) {
+            $this->log($caught);
+            return new DeliveryResult(error: $caught);
+        }
+
+        if ($sync || !$this->configuration->async) {
+            return $this->deliverTransaction($payload);
+        }
+
+        register_shutdown_function(function () use ($payload): void {
+            $this->deliverTransaction($payload);
+        });
+
+        return new DeliveryResult(status: 202, queued: true);
+    }
+
+    /**
      * @param array<string, mixed> $notice
      */
     public function deliver(array $notice): DeliveryResult
     {
-        $url = $this->noticesUrl();
-        $body = json_encode($notice, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        return $this->deliverPayload($this->noticesUrl(), $notice);
+    }
+
+    /**
+     * @param array<string, mixed> $transaction
+     */
+    public function deliverTransaction(array $transaction): DeliveryResult
+    {
+        return $this->deliverPayload($this->transactionsUrl(), $transaction);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function deliverPayload(string $url, array $payload): DeliveryResult
+    {
+        $body = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         if ($body === false) {
             $exception = new \RuntimeException('Failed to JSON-encode notice');
             $this->log($exception);
@@ -95,12 +144,20 @@ class Client
         ]);
 
         $response = @file_get_contents($url, false, $context);
-        $status = $this->extractStatus($http_response_header ?? []);
+        $status = $this->extractStatus($http_response_header);
 
         if ($response === false && $status === null) {
             $exception = new \RuntimeException('Errorgap delivery failed: network error');
             $this->log($exception);
             return new DeliveryResult(error: $exception);
+        }
+
+        if ($status !== null && $status >= 400) {
+            $this->log(new \RuntimeException(sprintf(
+                'Errorgap delivery failed: HTTP %d%s',
+                $status,
+                $response === false || $response === '' ? '' : ' ' . $response,
+            )));
         }
 
         return new DeliveryResult(
@@ -113,6 +170,25 @@ class Client
     {
         $base = rtrim($this->configuration->endpoint, '/');
         return sprintf('%s/api/projects/%s/notices', $base, $this->configuration->projectSlug ?? '');
+    }
+
+    private function transactionsUrl(): string
+    {
+        $base = rtrim($this->configuration->endpoint, '/');
+        return sprintf('%s/api/projects/%s/transactions', $base, $this->configuration->projectSlug ?? '');
+    }
+
+    private function shouldSampleApm(): bool
+    {
+        $rate = $this->configuration->apmSampleRate;
+        if ($rate >= 1.0) {
+            return true;
+        }
+        if ($rate <= 0.0) {
+            return false;
+        }
+
+        return mt_rand() / mt_getrandmax() < $rate;
     }
 
     /**

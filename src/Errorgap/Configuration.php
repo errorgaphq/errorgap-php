@@ -64,8 +64,10 @@ final class Configuration
         $this->async = $options['async'] ?? true;
         $this->logger = array_key_exists('logger', $options) ? $options['logger'] : null;
         $this->filterKeys = $options['filterKeys'] ?? self::DEFAULT_FILTER_KEYS;
-        $this->apmEnabled = $options['apmEnabled'] ?? false;
-        $this->apmSampleRate = $options['apmSampleRate'] ?? 1.0;
+        $this->apmEnabled = $options['apmEnabled']
+            ?? filter_var(getenv('ERRORGAP_APM_ENABLED') ?: false, FILTER_VALIDATE_BOOL);
+        $this->apmSampleRate = max(0.0, min(1.0, (float)($options['apmSampleRate']
+            ?? (getenv('ERRORGAP_APM_SAMPLE_RATE') ?: 1.0))));
         $this->timeoutSeconds = $options['timeoutSeconds'] ?? 5;
     }
 

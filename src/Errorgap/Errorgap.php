@@ -26,6 +26,8 @@ final class Errorgap
      *   logger?: ?\Psr\Log\LoggerInterface,
      *   filterKeys?: list<string>,
      *   timeoutSeconds?: int,
+     *   apmEnabled?: bool,
+     *   apmSampleRate?: float,
      *   captureGlobals?: bool,
      * } $options
      */
@@ -59,6 +61,12 @@ final class Errorgap
         bool $sync = false,
     ): DeliveryResult {
         return self::client()->notify($exception, $context, $environment, $session, $params, $sync);
+    }
+
+    /** @param array<string, mixed> $transaction */
+    public static function notifyTransaction(array $transaction, bool $sync = false): DeliveryResult
+    {
+        return self::client()->notifyTransaction($transaction, $sync);
     }
 
     public static function configuration(): Configuration

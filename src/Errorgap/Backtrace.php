@@ -6,29 +6,86 @@ namespace Errorgap;
 
 final class Backtrace
 {
+    private const SOURCE_CONTEXT_LINES = 6;
+    private const MAX_SOURCE_LINE_LENGTH = 400;
+    private const MAX_SOURCE_FILE_BYTES = 2_000_000;
+
     /**
-     * @return list<array{file: ?string, line: ?int, function: ?string, in_app: bool, index: int}>
+     * @return list<array{
+     *   file: ?string,
+     *   line: ?int,
+     *   function: ?string,
+     *   in_app: bool,
+     *   index: int,
+     *   source?: array{start_line: int, lines: list<string>}
+     * }>
      */
     public static function fromThrowable(\Throwable $exception, string $rootDirectory): array
     {
         $frames = [];
         $index = 0;
-        foreach ($exception->getTrace() as $frame) {
+        $trace = $exception->getTrace();
+
+        // Throwable::getTrace() starts at the caller of the throwing function.
+        // Add the throwable's own file and line first so the dashboard points at
+        // the actual throw statement and can render its source excerpt.
+        $frames[] = self::frame(
+            $exception->getFile(),
+            $exception->getLine(),
+            isset($trace[0]) ? self::formatFunction($trace[0]) : null,
+            $rootDirectory,
+            $index++,
+        );
+
+        foreach ($trace as $frame) {
             /** @var array<string, mixed> $frame */
             $file = isset($frame['file']) && is_string($frame['file']) ? $frame['file'] : null;
+            // The ingestion contract requires a string file path. PHP uses
+            // file-less frames for internal functions such as array_map();
+            // skip those frames while retaining their surrounding vendor calls.
+            if ($file === null) {
+                continue;
+            }
             $line = isset($frame['line']) && is_int($frame['line']) ? $frame['line'] : null;
             $function = self::formatFunction($frame);
 
-            $frames[] = [
-                'file' => self::relative($file, $rootDirectory),
-                'line' => $line,
-                'function' => $function,
-                'in_app' => self::isInApp($file, $rootDirectory),
-                'index' => $index++,
-            ];
+            $frames[] = self::frame($file, $line, $function, $rootDirectory, $index++);
         }
 
         return $frames;
+    }
+
+    /**
+     * @return array{
+     *   file: ?string,
+     *   line: ?int,
+     *   function: ?string,
+     *   in_app: bool,
+     *   index: int,
+     *   source?: array{start_line: int, lines: list<string>}
+     * }
+     */
+    private static function frame(
+        ?string $file,
+        ?int $line,
+        ?string $function,
+        string $rootDirectory,
+        int $index,
+    ): array {
+        $frame = [
+            'file' => self::relative($file, $rootDirectory),
+            'line' => $line,
+            'function' => $function,
+            'in_app' => self::isInApp($file, $rootDirectory),
+            'index' => $index,
+        ];
+
+        $source = self::sourceExcerpt($file, $line);
+        if ($source !== null) {
+            $frame['source'] = $source;
+        }
+
+        return $frame;
     }
 
     /**
@@ -72,5 +129,40 @@ final class Backtrace
             return false;
         }
         return str_starts_with($file, $root);
+    }
+
+    /**
+     * @return array{start_line: int, lines: list<string>}|null
+     */
+    private static function sourceExcerpt(?string $file, ?int $line): ?array
+    {
+        if ($file === null || $line === null || $line < 1 || !is_file($file) || !is_readable($file)) {
+            return null;
+        }
+
+        $size = @filesize($file);
+        if ($size === false || $size > self::MAX_SOURCE_FILE_BYTES) {
+            return null;
+        }
+
+        $contents = @file($file, FILE_IGNORE_NEW_LINES);
+        if ($contents === false) {
+            return null;
+        }
+
+        $startLine = max(1, $line - self::SOURCE_CONTEXT_LINES);
+        $length = (self::SOURCE_CONTEXT_LINES * 2) + 1;
+        $excerpt = array_slice($contents, $startLine - 1, $length);
+        if ($excerpt === []) {
+            return null;
+        }
+
+        $lines = [];
+        foreach ($excerpt as $sourceLine) {
+            $sourceLine = substr($sourceLine, 0, self::MAX_SOURCE_LINE_LENGTH);
+            $lines[] = preg_match('//u', $sourceLine) === 1 ? $sourceLine : '[invalid UTF-8]';
+        }
+
+        return ['start_line' => $startLine, 'lines' => $lines];
     }
 }
