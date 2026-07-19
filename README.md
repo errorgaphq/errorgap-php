@@ -1,9 +1,14 @@
 # errorgap/errorgap
 
-PHP notifier for [Errorgap](https://errorgap.com). Captures throwables,
-normalizes backtraces, and ships notices to an Errorgap server. Use this
+PHP notifier for [Errorgap](https://errorgap.com). Captures throwables with
+source-aware backtraces, nested exception causes, breadcrumbs, structured
+logs, and APM transactions, and ships them to an Errorgap server. Use this
 package for plain PHP, Symfony, Slim, or any framework other than WordPress
 or Laravel (those have their own dedicated packages).
+
+Backtrace frames are resolved against the local source tree — file, line,
+function, an app-versus-vendor flag, and a surrounding source excerpt — so the
+dashboard renders highlighted source without any repository integration.
 
 ## Install
 
@@ -45,6 +50,55 @@ try {
 `notify` returns a `DeliveryResult` (`status`, `body`, `error`, `queued`).
 The SDK never throws.
 
+Nested exceptions are captured automatically: wrap with
+`new DomainException($message, 0, $previous)` and each `getPrevious()` cause's
+type/message lands in `context.causes` while its frames merge into the
+backtrace.
+
+## Breadcrumbs
+
+Record navigation, queries, and requests; the recent trail is attached to every
+notice as `context.breadcrumbs`.
+
+```php
+Errorgap::addBreadcrumb('loaded checkout', 'navigation', ['from' => 'cart']);
+```
+
+## Structured logs
+
+```php
+Errorgap::log('payment gateway timeout', 'error', source: 'payments');
+```
+
+Levels are `trace < debug < info < warn < error < fatal`; anything below
+`minimumLogLevel` is dropped client-side.
+
+## Performance (APM)
+
+Time a web request or job and record DB/HTTP spans:
+
+```php
+use Errorgap\SpanCollector;
+
+Errorgap::trackTransaction(
+    ['method' => 'GET', 'path' => '/orders/{orderId}', 'path_raw' => '/orders/123'],
+    function (SpanCollector $spans) {
+        $spans->database('SELECT * FROM orders WHERE id = 123', 4.2, function: 'OrderRepo::load');
+        $spans->external(88.0, function: 'PaymentGateway::charge');
+        // ... handle the request ...
+    },
+);
+
+Errorgap::trackJob('ReceiptJob', function (SpanCollector $spans) {
+    $spans->database('INSERT INTO receipts ...', 6.0);
+}, queue: 'mailers');
+```
+
+`path` is the normalized route template used for grouping; `path_raw` is the
+concrete URL. Both helpers time the callback and deliver on completion even if
+it throws. Use `Errorgap::notifyTransaction($array)` for a pre-measured
+transaction. APM delivery requires `'apmEnabled' => true`.
+
 ## Async delivery
 
 By default, async mode schedules the HTTP call via `register_shutdown_function`
@@ -66,6 +120,11 @@ and long-running workers).
 | `logger` | `null` | PSR-3 logger; pass to receive SDK warnings |
 | `filterKeys` | `['password', 'token', ...]` | Substring, case-insensitive |
 | `timeoutSeconds` | `5` | HTTP request timeout |
+| `apmEnabled` | `false` | Deliver APM transactions |
+| `apmSampleRate` | `1.0` | Fraction (0..1) of transactions delivered |
+| `logsEnabled` | `true` | Deliver structured logs |
+| `minimumLogLevel` | `info` | Drop logs below this level |
+| `maxBreadcrumbs` | `25` | Breadcrumbs retained per notice |
 | `captureGlobals` | `true` | Install error + exception handlers |
 
 ## Verify

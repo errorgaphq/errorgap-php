@@ -168,4 +168,47 @@ final class ClientTest extends TestCase
         $this->assertSame(204, $disabled->notifyTransaction(['kind' => 'web'])->status);
         $this->assertSame(204, $sampledOut->notifyTransaction(['kind' => 'web'])->status);
     }
+
+    public function testPostsStructuredLog(): void
+    {
+        $ingestor = new FakeIngestor();
+        try {
+            $client = new Client(new Configuration([
+                'endpoint' => $ingestor->endpoint(),
+                'projectSlug' => 'demo',
+                'apiKey' => 'flk_test',
+                'async' => false,
+                'timeoutSeconds' => 30,
+            ]));
+
+            $pid = pcntl_fork();
+            if ($pid === 0) {
+                $ingestor->acceptOne();
+                exit(0);
+            }
+            usleep(20_000);
+
+            $result = $client->notifyLog('gateway timeout', 'error', 'payments', sync: true);
+            $this->assertSame(201, $result->status);
+
+            pcntl_waitpid($pid, $status);
+            $captured = $ingestor->lastRequest();
+            $this->assertNotNull($captured);
+            $this->assertSame('/api/projects/demo/logs', $captured['path']);
+            $this->assertSame('gateway timeout', $captured['body']['message']);
+            $this->assertSame('error', $captured['body']['level']);
+            $this->assertSame('payments', $captured['body']['source']);
+        } finally {
+            $ingestor->close();
+        }
+    }
+
+    public function testDropsLogBelowMinimumLevel(): void
+    {
+        $client = new Client(new Configuration([
+            'projectSlug' => 'demo',
+            'minimumLogLevel' => 'warn',
+        ]));
+        $this->assertSame(204, $client->notifyLog('chatty', 'info', sync: true)->status);
+    }
 }

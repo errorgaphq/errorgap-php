@@ -50,6 +50,26 @@ final class BacktraceTest extends TestCase
         $this->assertNotContains(null, array_column($frames, 'file'));
     }
 
+    public function testChainMergesPreviousExceptionFramesReindexed(): void
+    {
+        try {
+            try {
+                throw new \RuntimeException('root cause');
+            } catch (\Throwable $root) {
+                throw new \DomainException('wrapped', 0, $root);
+            }
+        } catch (\Throwable $top) {
+            $single = Backtrace::fromThrowable($top, dirname(__DIR__));
+            $chain = Backtrace::chain($top, dirname(__DIR__));
+        }
+
+        // The chain includes at least the wrapper's own frames plus the cause's.
+        $this->assertGreaterThan(count($single), count($chain));
+        foreach ($chain as $i => $frame) {
+            $this->assertSame($i, $frame['index']);
+        }
+    }
+
     private function throwFromMethod(): \Throwable
     {
         try {

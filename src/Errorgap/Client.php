@@ -98,6 +98,49 @@ class Client
     }
 
     /**
+     * Deliver one structured log line.
+     */
+    public function notifyLog(
+        string $message,
+        string $level = 'info',
+        ?string $source = null,
+        bool $sync = false,
+    ): DeliveryResult {
+        try {
+            $this->configuration->validate();
+        } catch (\Throwable $caught) {
+            $this->log($caught);
+            return new DeliveryResult(error: $caught);
+        }
+
+        $normalized = LogLevel::normalize($level);
+        $threshold = LogLevel::rank(LogLevel::normalize($this->configuration->minimumLogLevel));
+        if (!$this->configuration->logsEnabled || LogLevel::rank($normalized) < $threshold) {
+            return new DeliveryResult(status: 204);
+        }
+
+        $payload = [
+            'message' => $message,
+            'level' => $normalized,
+            'environment' => $this->configuration->environment,
+            'occurred_at' => gmdate('Y-m-d\TH:i:s\Z'),
+        ];
+        if ($source !== null && $source !== '') {
+            $payload['source'] = $source;
+        }
+
+        if ($sync || !$this->configuration->async) {
+            return $this->deliverPayload($this->logsUrl(), $payload);
+        }
+
+        register_shutdown_function(function () use ($payload): void {
+            $this->deliverPayload($this->logsUrl(), $payload);
+        });
+
+        return new DeliveryResult(status: 202, queued: true);
+    }
+
+    /**
      * @param array<string, mixed> $notice
      */
     public function deliver(array $notice): DeliveryResult
@@ -176,6 +219,12 @@ class Client
     {
         $base = rtrim($this->configuration->endpoint, '/');
         return sprintf('%s/api/projects/%s/transactions', $base, $this->configuration->projectSlug ?? '');
+    }
+
+    private function logsUrl(): string
+    {
+        $base = rtrim($this->configuration->endpoint, '/');
+        return sprintf('%s/api/projects/%s/logs', $base, $this->configuration->projectSlug ?? '');
     }
 
     private function shouldSampleApm(): bool

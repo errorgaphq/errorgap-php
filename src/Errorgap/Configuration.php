@@ -30,6 +30,9 @@ final class Configuration
     public bool $apmEnabled;
     public float $apmSampleRate;
     public int $timeoutSeconds;
+    public bool $logsEnabled;
+    public string $minimumLogLevel;
+    public int $maxBreadcrumbs;
 
     /**
      * @param array{
@@ -45,6 +48,9 @@ final class Configuration
      *   apmEnabled?: bool,
      *   apmSampleRate?: float,
      *   timeoutSeconds?: int,
+     *   logsEnabled?: bool,
+     *   minimumLogLevel?: string,
+     *   maxBreadcrumbs?: int,
      * } $options
      */
     public function __construct(array $options = [])
@@ -69,6 +75,10 @@ final class Configuration
         $this->apmSampleRate = max(0.0, min(1.0, (float)($options['apmSampleRate']
             ?? (getenv('ERRORGAP_APM_SAMPLE_RATE') ?: 1.0))));
         $this->timeoutSeconds = $options['timeoutSeconds'] ?? 5;
+        $this->logsEnabled = $options['logsEnabled'] ?? true;
+        $this->minimumLogLevel = $options['minimumLogLevel']
+            ?? (string)(getenv('ERRORGAP_MIN_LOG_LEVEL') ?: 'info');
+        $this->maxBreadcrumbs = max(0, $options['maxBreadcrumbs'] ?? 25);
     }
 
     public function validate(): void

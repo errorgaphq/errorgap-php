@@ -9,6 +9,44 @@ final class Backtrace
     private const SOURCE_CONTEXT_LINES = 6;
     private const MAX_SOURCE_LINE_LENGTH = 400;
     private const MAX_SOURCE_FILE_BYTES = 2_000_000;
+    private const MAX_CAUSE_DEPTH = 10;
+
+    /**
+     * Walk the `getPrevious()` chain and merge each exception's frames into a
+     * single, contiguously indexed backtrace so the dashboard renders a wrapped
+     * exception and its cause as one stack.
+     *
+     * @return list<array{
+     *   file: ?string,
+     *   line: ?int,
+     *   function: ?string,
+     *   in_app: bool,
+     *   index: int,
+     *   source?: array{start_line: int, lines: list<string>}
+     * }>
+     */
+    public static function chain(\Throwable $exception, string $rootDirectory): array
+    {
+        $frames = [];
+        $index = 0;
+        /** @var list<\Throwable> $seen */
+        $seen = [];
+        $current = $exception;
+
+        while ($current !== null
+            && !in_array($current, $seen, true)
+            && count($seen) < self::MAX_CAUSE_DEPTH
+        ) {
+            $seen[] = $current;
+            foreach (self::fromThrowable($current, $rootDirectory) as $frame) {
+                $frame['index'] = $index++;
+                $frames[] = $frame;
+            }
+            $current = $current->getPrevious();
+        }
+
+        return $frames;
+    }
 
     /**
      * @return list<array{
