@@ -34,6 +34,11 @@ class Client
         array $params = [],
         bool $sync = false,
     ): DeliveryResult {
+        // The request or job this error was raised in, so errorgap links the two.
+        $transactionId = TransactionContext::current();
+        if ($transactionId !== null && !array_key_exists('transaction_id', $context)) {
+            $context['transaction_id'] = $transactionId;
+        }
         try {
             $this->configuration->validate();
             $notice = Notice::fromThrowable(
