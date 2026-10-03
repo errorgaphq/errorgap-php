@@ -17,6 +17,9 @@ final class TransactionContext
 {
     private static ?string $current = null;
 
+    /** @var list<?string> ids that were current before each begin() */
+    private static array $previous = [];
+
     public static function current(): ?string
     {
         return self::$current;
@@ -32,14 +35,30 @@ final class TransactionContext
      */
     public static function run(callable $operation): mixed
     {
-        $previous = self::$current;
-        $id = self::newId();
-        self::$current = $id;
+        $id = self::begin();
         try {
             return $operation($id);
         } finally {
-            self::$current = $previous;
+            self::end();
         }
+    }
+
+    /**
+     * Start a transaction whose end arrives in a later call — event-driven
+     * integrations (a queue's "job processing" and "job processed" events).
+     * Returns its id; pair with {@see end()}.
+     */
+    public static function begin(): string
+    {
+        self::$previous[] = self::$current;
+        self::$current = self::newId();
+        return self::$current;
+    }
+
+    /** End the transaction {@see begin()} started, restoring the one before it. */
+    public static function end(): void
+    {
+        self::$current = self::$previous === [] ? null : array_pop(self::$previous);
     }
 
     /** A random (version 4) UUID in canonical lowercase form. */

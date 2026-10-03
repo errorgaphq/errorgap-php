@@ -30,6 +30,20 @@ final class TransactionContextTest extends TestCase
         $this->assertNull(TransactionContext::current());
     }
 
+    public function testBeginAndEndPairForEventDrivenWork(): void
+    {
+        $outer = TransactionContext::begin();
+        $inner = TransactionContext::begin();
+        $this->assertSame($inner, TransactionContext::current());
+        TransactionContext::end();
+        $this->assertSame($outer, TransactionContext::current());
+        TransactionContext::end();
+        $this->assertNull(TransactionContext::current());
+        // An unmatched end() is harmless.
+        TransactionContext::end();
+        $this->assertNull(TransactionContext::current());
+    }
+
     public function testTheIdIsRestoredWhenTheOperationThrows(): void
     {
         try {
