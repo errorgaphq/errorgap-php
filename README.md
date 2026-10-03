@@ -99,6 +99,12 @@ concrete URL. Both helpers time the callback and deliver on completion even if
 it throws. Use `Errorgap::notifyTransaction($array)` for a pre-measured
 transaction. APM delivery requires `'apmEnabled' => true`.
 
+Each transaction gets an id, and errors reported while its callback runs
+carry it as `context.transaction_id`, so errorgap shows the error a request
+actually raised on its trace and links each occurrence to its request.
+`Errorgap::currentTransactionId()` returns the id in effect; framework
+integrations wrap their own work with `TransactionContext::run(fn (string $id) => ...)`.
+
 ## Async delivery
 
 By default, async mode schedules the HTTP call via `register_shutdown_function`

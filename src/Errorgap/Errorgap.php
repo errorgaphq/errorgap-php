@@ -72,6 +72,12 @@ final class Errorgap
         return self::client()->notify($exception, $context, $environment, $session, $params, $sync);
     }
 
+    /** The id of the APM transaction running now, if any. */
+    public static function currentTransactionId(): ?string
+    {
+        return TransactionContext::current();
+    }
+
     /** @param array<string, mixed> $transaction */
     public static function notifyTransaction(array $transaction, bool $sync = false): DeliveryResult
     {
@@ -112,18 +118,21 @@ final class Errorgap
      */
     public static function trackTransaction(array $meta, callable $operation): mixed
     {
-        $collector = new SpanCollector();
-        $startedAt = gmdate('Y-m-d\TH:i:s\Z');
-        $start = microtime(true);
-        try {
-            return $operation($collector);
-        } finally {
-            self::notifyTransaction(array_merge(
-                ['kind' => 'web', 'occurred_at' => $startedAt],
-                $meta,
-                ['duration_ms' => (microtime(true) - $start) * 1000.0, 'spans' => $collector->toArray()],
-            ));
-        }
+        // Errors reported while the operation runs carry this transaction's id.
+        return TransactionContext::run(static function (string $id) use ($meta, $operation): mixed {
+            $collector = new SpanCollector();
+            $startedAt = gmdate('Y-m-d\TH:i:s\Z');
+            $start = microtime(true);
+            try {
+                return $operation($collector);
+            } finally {
+                self::notifyTransaction(array_merge(
+                    ['id' => $id, 'kind' => 'web', 'occurred_at' => $startedAt],
+                    $meta,
+                    ['duration_ms' => (microtime(true) - $start) * 1000.0, 'spans' => $collector->toArray()],
+                ));
+            }
+        });
     }
 
     /**
@@ -131,21 +140,24 @@ final class Errorgap
      */
     public static function trackJob(string $jobClass, callable $operation, string $queue = 'default'): mixed
     {
-        $collector = new SpanCollector();
-        $startedAt = gmdate('Y-m-d\TH:i:s\Z');
-        $start = microtime(true);
-        try {
-            return $operation($collector);
-        } finally {
-            self::notifyTransaction([
-                'kind' => 'job',
+        return TransactionContext::run(static function (string $id) use ($jobClass, $operation, $queue): mixed {
+            $collector = new SpanCollector();
+            $startedAt = gmdate('Y-m-d\TH:i:s\Z');
+            $start = microtime(true);
+            try {
+                return $operation($collector);
+            } finally {
+                self::notifyTransaction([
+                    'id' => $id,
+                    'kind' => 'job',
                 'job_class' => $jobClass,
                 'queue' => $queue,
-                'occurred_at' => $startedAt,
-                'duration_ms' => (microtime(true) - $start) * 1000.0,
-                'spans' => $collector->toArray(),
-            ]);
-        }
+                    'occurred_at' => $startedAt,
+                    'duration_ms' => (microtime(true) - $start) * 1000.0,
+                    'spans' => $collector->toArray(),
+                ]);
+            }
+        });
     }
 
     public static function breadcrumbs(): Breadcrumbs
