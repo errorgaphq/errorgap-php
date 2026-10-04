@@ -61,6 +61,26 @@ final class TransactionContext
         self::$current = self::$previous === [] ? null : array_pop(self::$previous);
     }
 
+    /**
+     * The trace id a browser SDK sent in the `x-errorgap-trace` header,
+     * linking its view of an API call to the server transaction that answered
+     * it. Defaults to the current request's header; only a well-formed UUID
+     * is returned, lowercased.
+     */
+    public static function browserTraceId(?string $header = null): ?string
+    {
+        $header ??= isset($_SERVER['HTTP_X_ERRORGAP_TRACE']) && is_string($_SERVER['HTTP_X_ERRORGAP_TRACE'])
+            ? $_SERVER['HTTP_X_ERRORGAP_TRACE']
+            : null;
+        if ($header === null) {
+            return null;
+        }
+        $value = strtolower(trim($header));
+        return preg_match('/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/', $value) === 1
+            ? $value
+            : null;
+    }
+
     /** A random (version 4) UUID in canonical lowercase form. */
     public static function newId(): string
     {

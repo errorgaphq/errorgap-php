@@ -105,6 +105,12 @@ actually raised on its trace and links each occurrence to its request.
 `Errorgap::currentTransactionId()` returns the id in effect; framework
 integrations wrap their own work with `TransactionContext::run(fn (string $id) => ...)`.
 
+When the errorgap browser SDK is on the page, its API calls send an
+`x-errorgap-trace` header. `trackTransaction` records it as the transaction's
+`trace_id` (read from `$_SERVER`; pass `'trace_id'` in `$meta` to override, or
+call `TransactionContext::browserTraceId($header)` yourself), so errorgap's
+browser Performance view links each call to the server request that answered it.
+
 ## Async delivery
 
 By default, async mode schedules the HTTP call via `register_shutdown_function`

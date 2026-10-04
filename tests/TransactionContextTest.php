@@ -125,4 +125,53 @@ final class TransactionContextTest extends TestCase
             $ingestor->close();
         }
     }
+
+    public function testBrowserTraceIdAcceptsOnlyUuids(): void
+    {
+        $this->assertSame(
+            '0192f3c4-7a1b-4c2d-9e3f-0123456789ab',
+            TransactionContext::browserTraceId(' 0192F3C4-7A1B-4C2D-9E3F-0123456789AB '),
+        );
+        $this->assertNull(TransactionContext::browserTraceId('not-a-uuid'));
+        $this->assertNull(TransactionContext::browserTraceId('0192f3c4-7a1b-4c2d-9e3f-0123456789ab; drop'));
+    }
+
+    public function testTrackTransactionRecordsTheBrowserTraceHeader(): void
+    {
+        $ingestor = new FakeIngestor();
+        $_SERVER['HTTP_X_ERRORGAP_TRACE'] = '0192f3c4-7a1b-4c2d-9e3f-0123456789ab';
+        try {
+            Errorgap::init([
+                'endpoint' => $ingestor->endpoint(),
+                'projectSlug' => 'demo',
+                'apiKey' => 'egp_test',
+                'async' => false,
+                'apmEnabled' => true,
+                'apmSampleRate' => 1.0,
+                'timeoutSeconds' => 30,
+                'captureGlobals' => false,
+            ]);
+
+            $pid = pcntl_fork();
+            if ($pid === 0) {
+                $ingestor->acceptOne();
+                exit(0);
+            }
+            usleep(20_000);
+
+            $id = Errorgap::trackTransaction(
+                ['method' => 'GET', 'path' => '/orders/{id}', 'path_raw' => '/orders/7', 'status_code' => 200],
+                fn (): ?string => Errorgap::currentTransactionId(),
+            );
+            pcntl_waitpid($pid, $status);
+
+            $captured = $ingestor->lastRequest();
+            $this->assertNotNull($captured);
+            $this->assertSame($id, $captured['body']['id']);
+            $this->assertSame('0192f3c4-7a1b-4c2d-9e3f-0123456789ab', $captured['body']['trace_id']);
+        } finally {
+            unset($_SERVER['HTTP_X_ERRORGAP_TRACE']);
+            $ingestor->close();
+        }
+    }
 }
