@@ -127,7 +127,10 @@ final class Errorgap
                 return $operation($collector);
             } finally {
                 self::notifyTransaction(array_merge(
-                    ['id' => $id, 'kind' => 'web', 'occurred_at' => $startedAt],
+                    array_filter(
+                        ['id' => $id, 'trace_id' => TransactionContext::browserTraceId(), 'kind' => 'web', 'occurred_at' => $startedAt],
+                        static fn ($value): bool => $value !== null,
+                    ),
                     $meta,
                     ['duration_ms' => (microtime(true) - $start) * 1000.0, 'spans' => $collector->toArray()],
                 ));
@@ -150,8 +153,8 @@ final class Errorgap
                 self::notifyTransaction([
                     'id' => $id,
                     'kind' => 'job',
-                'job_class' => $jobClass,
-                'queue' => $queue,
+                    'job_class' => $jobClass,
+                    'queue' => $queue,
                     'occurred_at' => $startedAt,
                     'duration_ms' => (microtime(true) - $start) * 1000.0,
                     'spans' => $collector->toArray(),
