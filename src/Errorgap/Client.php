@@ -146,6 +146,52 @@ class Client
     }
 
     /**
+     * Report a sign-in to this app (Security › Logins). Dropped unless
+     * `authEvents` is on, or when the outcome is unknown.
+     */
+    public function signIn(
+        string $outcome,
+        ?string $user = null,
+        ?object $request = null,
+        ?string $ip = null,
+        ?string $userAgent = null,
+        ?string $path = null,
+        ?string $method = null,
+        bool $sync = false,
+    ): DeliveryResult {
+        try {
+            $this->configuration->validate();
+        } catch (\Throwable $caught) {
+            $this->log($caught);
+            return new DeliveryResult(error: $caught);
+        }
+        if (!$this->configuration->authEvents) {
+            return new DeliveryResult(status: 204);
+        }
+        $event = SignIn::build($outcome, $user, $request, $ip, $userAgent, $path, $method, $_SERVER);
+        if ($event === null) {
+            $this->log(new \InvalidArgumentException(sprintf('unknown sign-in outcome "%s"', $outcome)));
+            return new DeliveryResult(status: 204);
+        }
+        $payload = SignIn::payload($event, $this->configuration);
+        $url = sprintf(
+            '%s/api/projects/%s/logins/web',
+            rtrim($this->configuration->endpoint, '/'),
+            $this->configuration->projectSlug ?? '',
+        );
+
+        if ($sync || !$this->configuration->async) {
+            return $this->deliverPayload($url, $payload);
+        }
+
+        register_shutdown_function(function () use ($url, $payload): void {
+            $this->deliverPayload($url, $payload);
+        });
+
+        return new DeliveryResult(status: 202, queued: true);
+    }
+
+    /**
      * @param array<string, mixed> $notice
      */
     public function deliver(array $notice): DeliveryResult

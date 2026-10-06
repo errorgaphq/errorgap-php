@@ -32,6 +32,8 @@ final class Errorgap
      *   logsEnabled?: bool,
      *   minimumLogLevel?: string,
      *   maxBreadcrumbs?: int,
+     *   authEvents?: bool,
+     *   appName?: string,
      *   captureGlobals?: bool,
      * } $options
      */
@@ -82,6 +84,25 @@ final class Errorgap
     public static function notifyTransaction(array $transaction, bool $sync = false): DeliveryResult
     {
         return self::client()->notifyTransaction($transaction, $sync);
+    }
+
+    /**
+     * Report a sign-in to this app: "success", "failure", "password_reset",
+     * "mfa_failure" or "locked". The IP, user agent and path come from a
+     * PSR-7 `$request` when given, else from `$_SERVER`. Needs
+     * `authEvents: true`. Never pass passwords or tokens.
+     */
+    public static function signIn(
+        string $outcome,
+        ?string $user = null,
+        ?object $request = null,
+        ?string $ip = null,
+        ?string $userAgent = null,
+        ?string $path = null,
+        ?string $method = null,
+        bool $sync = false,
+    ): DeliveryResult {
+        return self::client()->signIn($outcome, $user, $request, $ip, $userAgent, $path, $method, $sync);
     }
 
     /** Deliver one structured log line. */

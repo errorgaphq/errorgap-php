@@ -111,6 +111,27 @@ When the errorgap browser SDK is on the page, its API calls send an
 call `TransactionContext::browserTraceId($header)` yourself), so errorgap's
 browser Performance view links each call to the server request that answered it.
 
+## Sign-ins
+
+Report sign-ins to your app; errorgap shows them beside SSH logins in
+Security › Logins and flags a new IP, country or hour for a user. Off until
+you opt in, since events carry user names and IPs:
+
+```php
+Errorgap::init(['projectSlug' => 'ox-coffee', 'authEvents' => true, 'appName' => 'oxcoffee-web']);
+
+// after your own credential check:
+Errorgap::signIn($ok ? 'success' : 'failure', $email);
+Errorgap::signIn('mfa_failure', $email, $psrRequest);
+```
+
+Outcomes: `success`, `failure`, `password_reset`, `mfa_failure`, `locked`.
+The IP, user agent and path come from a PSR-7 request when you pass one,
+else from `$_SERVER` (the path without its query string); behind a proxy,
+pass `ip:` yourself. Never pass passwords or tokens; errorgap can also store
+user names hashed (Security › Logins › Web apps › Privacy). WordPress sites
+get this from the errorgap plugin.
+
 ## Async delivery
 
 By default, async mode schedules the HTTP call via `register_shutdown_function`
@@ -137,6 +158,8 @@ and long-running workers).
 | `logsEnabled` | `true` | Deliver structured logs |
 | `minimumLogLevel` | `info` | Drop logs below this level |
 | `maxBreadcrumbs` | `25` | Breadcrumbs retained per notice |
+| `authEvents` | `false` | Send `signIn` events |
+| `appName` | `ERRORGAP_APP_NAME` or the project slug | The app's name in Security › Logins |
 | `captureGlobals` | `true` | Install error + exception handlers |
 
 ## Verify
