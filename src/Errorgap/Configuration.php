@@ -33,6 +33,10 @@ final class Configuration
     public bool $logsEnabled;
     public string $minimumLogLevel;
     public int $maxBreadcrumbs;
+    /** Report sign-ins (`signIn`). Off by default: events carry user names and IPs. */
+    public bool $authEvents;
+    /** The app's name in Security › Logins; defaults to the project slug. */
+    public ?string $appName;
 
     /**
      * @param array{
@@ -51,6 +55,8 @@ final class Configuration
      *   logsEnabled?: bool,
      *   minimumLogLevel?: string,
      *   maxBreadcrumbs?: int,
+     *   authEvents?: bool,
+     *   appName?: string,
      * } $options
      */
     public function __construct(array $options = [])
@@ -79,6 +85,8 @@ final class Configuration
         $this->minimumLogLevel = $options['minimumLogLevel']
             ?? (string)(getenv('ERRORGAP_MIN_LOG_LEVEL') ?: 'info');
         $this->maxBreadcrumbs = max(0, $options['maxBreadcrumbs'] ?? 25);
+        $this->authEvents = $options['authEvents'] ?? false;
+        $this->appName = $options['appName'] ?? (getenv('ERRORGAP_APP_NAME') ?: null);
     }
 
     public function validate(): void
