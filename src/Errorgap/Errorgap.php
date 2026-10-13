@@ -12,6 +12,15 @@ final class Errorgap
     private static bool $handlersInstalled = false;
     /** @var callable|null */
     private static $previousErrorHandler = null;
+    /** @var array<string, string> */
+    private static array $user = [];
+    private static bool $shutdownRegistered = false;
+    private static bool $uncaughtReported = false;
+    /** @var array<string, true> Errors already reported in this request. */
+    private static array $seenErrors = [];
+    private const FATAL_ERRORS = E_ERROR | E_PARSE | E_CORE_ERROR | E_COMPILE_ERROR | E_USER_ERROR;
+    /** Warnings and notices reported per request before the rest are skipped. */
+    private const MAX_ERRORS_PER_REQUEST = 20;
     /** @var callable|null */
     private static $previousExceptionHandler = null;
 
@@ -34,6 +43,9 @@ final class Errorgap
      *   maxBreadcrumbs?: int,
      *   authEvents?: bool,
      *   appName?: string,
+     *   release?: string,
+     *   ignoreEnvironments?: list<string>,
+     *   beforeNotify?: callable,
      *   captureGlobals?: bool,
      * } $options
      */
@@ -71,10 +83,27 @@ final class Errorgap
         if ($crumbs !== [] && !array_key_exists('breadcrumbs', $context)) {
             $context['breadcrumbs'] = $crumbs;
         }
+        $session = array_merge(self::$user, $session);
         return self::client()->notify($exception, $context, $environment, $session, $params, $sync);
     }
 
     /** The id of the APM transaction running now, if any. */
+    /**
+     * Name the user this request is acting for. Later notices carry it as
+     * `session.user_id` / `session.user_email`. Call with no arguments to
+     * clear it.
+     */
+    public static function setUser(string|int|null $id = null, ?string $email = null): void
+    {
+        self::$user = [];
+        if ($id !== null && (string)$id !== '') {
+            self::$user['user_id'] = (string)$id;
+        }
+        if ($email !== null && $email !== '') {
+            self::$user['user_email'] = $email;
+        }
+    }
+
     public static function currentTransactionId(): ?string
     {
         return TransactionContext::current();
@@ -216,6 +245,7 @@ final class Errorgap
         self::$handlersInstalled = true;
 
         self::$previousExceptionHandler = set_exception_handler(static function (\Throwable $exception): void {
+            self::$uncaughtReported = true;
             self::notify($exception, context: ['source' => 'exception_handler'], sync: true);
             if (self::$previousExceptionHandler !== null) {
                 (self::$previousExceptionHandler)($exception);
@@ -231,12 +261,48 @@ final class Errorgap
             if ((error_reporting() & $severity) === 0) {
                 return false;
             }
-            $exception = new \ErrorException($message, 0, $severity, $file, $line);
-            self::notify($exception, context: ['source' => 'error_handler'], sync: true);
+            // The same warning from a loop is reported once, and a request
+            // reports a bounded number: each is delivered when the request
+            // ends, so it never waits on errorgap.
+            $key = $severity . '|' . $file . '|' . $line . '|' . $message;
+            if (!isset(self::$seenErrors[$key]) && count(self::$seenErrors) < self::MAX_ERRORS_PER_REQUEST) {
+                self::$seenErrors[$key] = true;
+                $exception = new \ErrorException($message, 0, $severity, $file, $line);
+                self::notify($exception, context: ['source' => 'error_handler']);
+            }
             return self::$previousErrorHandler !== null
                 ? (bool)(self::$previousErrorHandler)($severity, $message, $file, $line)
                 : false;
         });
+
+        // Fatal errors (out of memory, a missing class, a parse error in an
+        // included file, the time limit) never reach either handler above.
+        if (!self::$shutdownRegistered) {
+            self::$shutdownRegistered = true;
+            register_shutdown_function(static function (): void {
+                self::reportFatal(error_get_last());
+            });
+        }
+    }
+
+    /**
+     * Report `error_get_last()` when it is a fatal error that ended the
+     * request. Public for testing.
+     *
+     * @param array{type: int, message: string, file: string, line: int}|null $error
+     */
+    public static function reportFatal(?array $error): ?DeliveryResult
+    {
+        if (!self::$handlersInstalled || self::$uncaughtReported || $error === null) {
+            return null;
+        }
+        if (($error['type'] & self::FATAL_ERRORS) === 0) {
+            return null;
+        }
+        // "Uncaught Exception: …" with the trace appended: keep the first line.
+        $message = explode("\n", $error['message'])[0];
+        $exception = new \ErrorException($message, 0, $error['type'], $error['file'], $error['line']);
+        return self::notify($exception, context: ['source' => 'shutdown', 'fatal' => true], sync: true);
     }
 
     private static function uninstallHandlers(): void
@@ -249,5 +315,7 @@ final class Errorgap
         self::$previousExceptionHandler = null;
         self::$previousErrorHandler = null;
         self::$handlersInstalled = false;
+        self::$uncaughtReported = false;
+        self::$seenErrors = [];
     }
 }

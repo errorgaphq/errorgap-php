@@ -49,6 +49,24 @@ class Client
                 $session,
                 $params,
             );
+            if ($this->configuration->ignoredEnvironment()) {
+                return new DeliveryResult(status: 202, body: 'ignored environment');
+            }
+            // A hook that throws is logged and skipped: a bug in a filter
+            // must not lose the error it was filtering.
+            if ($this->configuration->beforeNotify !== null) {
+                try {
+                    $result = ($this->configuration->beforeNotify)($notice);
+                    if ($result === false) {
+                        return new DeliveryResult(status: 202, body: 'dropped by beforeNotify');
+                    }
+                    if (is_array($result) && isset($result['errors'])) {
+                        $notice = $result;
+                    }
+                } catch (\Throwable $hookError) {
+                    $this->log($hookError);
+                }
+            }
         } catch (\Throwable $caught) {
             $this->log($caught);
             return new DeliveryResult(error: $caught);
@@ -212,7 +230,19 @@ class Client
      */
     private function deliverPayload(string $url, array $payload): DeliveryResult
     {
-        $body = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($this->configuration->ignoredEnvironment()) {
+            return new DeliveryResult(status: 204);
+        }
+        if ($this->rateLimited()) {
+            return new DeliveryResult(error: new \RuntimeException('Errorgap is rate limited, not sent'));
+        }
+
+        // Invalid UTF-8 (binary params) is replaced rather than losing the
+        // whole payload.
+        $body = json_encode(
+            $payload,
+            JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR,
+        );
         if ($body === false) {
             $exception = new \RuntimeException('Failed to JSON-encode notice');
             $this->log($exception);
@@ -238,12 +268,19 @@ class Client
         ]);
 
         $response = @file_get_contents($url, false, $context);
-        $status = $this->extractStatus($http_response_header);
+        // Unset when the connection itself failed (refused, DNS, timeout).
+        /** @var list<string> $responseHeaders */
+        $responseHeaders = $http_response_header ?? []; // @phpstan-ignore-line
+        $status = $this->extractStatus($responseHeaders);
 
         if ($response === false && $status === null) {
             $exception = new \RuntimeException('Errorgap delivery failed: network error');
             $this->log($exception);
             return new DeliveryResult(error: $exception);
+        }
+
+        if ($status === 429 || $status === 503) {
+            $this->pauseFor($this->retryAfter($responseHeaders));
         }
 
         if ($status !== null && $status >= 400) {
@@ -276,6 +313,51 @@ class Client
     {
         $base = rtrim($this->configuration->endpoint, '/');
         return sprintf('%s/api/projects/%s/logs', $base, $this->configuration->projectSlug ?? '');
+    }
+
+    /**
+     * A 429 or 503 pauses sending for the server's `Retry-After`. PHP
+     * requests share nothing, so the pause is a timestamp in a temp file
+     * that every worker of this app checks before sending.
+     */
+    private function rateLimited(): bool
+    {
+        $file = $this->pauseFile();
+        if (!@is_file($file)) {
+            return false;
+        }
+        $until = (int)@file_get_contents($file);
+        if ($until > time()) {
+            return true;
+        }
+        @unlink($file);
+        return false;
+    }
+
+    private function pauseFor(int $seconds): void
+    {
+        $seconds = max(1, min(300, $seconds));
+        @file_put_contents($this->pauseFile(), (string)(time() + $seconds), LOCK_EX);
+        $this->log(new \RuntimeException(sprintf('rate limited, pausing delivery for %ds', $seconds)));
+    }
+
+    private function pauseFile(): string
+    {
+        $key = md5($this->configuration->endpoint . '|' . ($this->configuration->projectSlug ?? ''));
+        return rtrim(sys_get_temp_dir(), '/\\') . '/errorgap-pause-' . $key;
+    }
+
+    /**
+     * @param list<string> $responseHeaders
+     */
+    private function retryAfter(array $responseHeaders): int
+    {
+        foreach ($responseHeaders as $line) {
+            if (preg_match('/^retry-after:\s*(\d+)\s*$/i', $line, $matches) === 1) {
+                return (int)$matches[1];
+            }
+        }
+        return 60;
     }
 
     private function shouldSampleApm(): bool

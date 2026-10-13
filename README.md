@@ -55,6 +55,37 @@ Nested exceptions are captured automatically: wrap with
 type/message lands in `context.causes` while its frames merge into the
 backtrace.
 
+## Fatal errors, filtering and hooks
+
+Besides uncaught exceptions and PHP errors, the SDK reports **fatal errors**
+that end a request without reaching a handler (out of memory, the time limit,
+a missing class, a parse error in an included file) from a shutdown function.
+Warnings and notices are delivered when the request ends, each distinct one
+once and at most 20 per request, so they never slow a response.
+
+```php
+Errorgap::init([
+    'filterKeys' => ['password', 'token', 'secret'],
+    'ignoreEnvironments' => ['testing'],
+    'beforeNotify' => static function (array $notice) {
+        if ($notice['errors'][0]['type'] === NotFoundHttpException::class) {
+            return false;                       // drop it
+        }
+        $notice['context']['team'] = 'billing'; // or change it
+        return $notice;
+    },
+]);
+
+Errorgap::setUser($user->id, $user->email);
+```
+
+`filterKeys` are masked at any depth in `params` and `session`; oversized
+values are cut and invalid UTF-8 is replaced rather than losing the notice.
+With `release` unset it is read from `ERRORGAP_RELEASE`, the hosting platform's
+commit variable, a `REVISION` file or the git checkout. After a 429 the SDK
+stops sending (across workers, via a marker in the temp directory) for the
+server's `Retry-After`.
+
 ## Breadcrumbs
 
 Record navigation, queries, and requests; the recent trail is attached to every
