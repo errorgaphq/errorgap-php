@@ -86,6 +86,16 @@ commit variable, a `REVISION` file or the git checkout. After a 429 the SDK
 stops sending (across workers, via a marker in the temp directory) for the
 server's `Retry-After`.
 
+## Monolog
+
+```php
+$logger->pushHandler(new \Errorgap\Monolog\Handler());   // Monolog 3, ERROR and above
+```
+
+A record with a Throwable under `context.exception` reports that exception;
+any other record is reported as a `LoggedError` with the message. The channel,
+level and remaining context are sent with it.
+
 ## Breadcrumbs
 
 Record navigation, queries, and requests; the recent trail is attached to every
