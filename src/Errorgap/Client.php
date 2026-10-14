@@ -236,6 +236,9 @@ class Client
         if ($this->rateLimited()) {
             return new DeliveryResult(error: new \RuntimeException('Errorgap is rate limited, not sent'));
         }
+        if (!$this->remotelyEnabled($url)) {
+            return new DeliveryResult(status: 204, body: 'switched off for this project');
+        }
 
         // Invalid UTF-8 (binary params) is replaced rather than losing the
         // whole payload.
@@ -339,6 +342,76 @@ class Client
         $seconds = max(1, min(300, $seconds));
         @file_put_contents($this->pauseFile(), (string)(time() + $seconds), LOCK_EX);
         $this->log(new \RuntimeException(sprintf('rate limited, pausing delivery for %ds', $seconds)));
+    }
+
+    /**
+     * The project's remote settings (Project settings › What SDKs send in
+     * errorgap): false only when the kind of data `$url` carries has been
+     * switched off there. PHP requests share nothing, so the settings are
+     * kept in a temp file and re-read from errorgap when they are older than
+     * the poll interval. If errorgap cannot be reached, everything stays on.
+     */
+    private function remotelyEnabled(string $url): bool
+    {
+        if (!$this->configuration->remoteSettings) {
+            return true;
+        }
+        $field = match (true) {
+            str_ends_with($url, '/notices') => 'errors_enabled',
+            str_ends_with($url, '/transactions') => 'apm_enabled',
+            str_ends_with($url, '/logs') => 'logs_enabled',
+            default => null,
+        };
+        if ($field === null) {
+            return true;
+        }
+        $settings = $this->remoteSettings();
+        return ($settings[$field] ?? true) !== false;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function remoteSettings(bool $refresh = false): array
+    {
+        $file = $this->pauseFile() . '-settings';
+        $cached = @is_file($file) ? json_decode((string)@file_get_contents($file), true) : null;
+        $cached = is_array($cached) ? $cached : [];
+        $interval = max(60, (int)($cached['poll_interval_seconds'] ?? 600));
+        if (!$refresh && $cached !== [] && (int)($cached['_fetched_at'] ?? 0) + $interval > time()) {
+            return $cached;
+        }
+
+        $headers = ['User-Agent: errorgap-php/' . Version::VERSION];
+        if ($this->configuration->apiKey !== null && $this->configuration->apiKey !== '') {
+            $headers[] = 'X-Errorgap-Project-Key: ' . $this->configuration->apiKey;
+        }
+        $context = stream_context_create(['http' => [
+            'method' => 'GET',
+            'header' => implode("\r\n", $headers),
+            // Short: this runs in a request, at most once per poll interval.
+            'timeout' => min(2, $this->configuration->timeoutSeconds),
+            'ignore_errors' => true,
+        ]]);
+        $base = rtrim($this->configuration->endpoint, '/');
+        $body = @file_get_contents(
+            sprintf('%s/api/projects/%s/config', $base, $this->configuration->projectSlug ?? ''),
+            false,
+            $context,
+        );
+        /** @var list<string> $responseHeaders */
+        $responseHeaders = $http_response_header ?? []; // @phpstan-ignore-line
+        $fresh = $this->extractStatus($responseHeaders) === 200 && is_string($body) ? json_decode($body, true) : null;
+        if (!is_array($fresh)) {
+            // Unreadable: keep what we had, and do not ask again for a minute.
+            $fresh = $cached;
+            $fresh['poll_interval_seconds'] = $cached['poll_interval_seconds'] ?? 600;
+            $fresh['_fetched_at'] = time() - max(60, (int)$fresh['poll_interval_seconds']) + 60;
+        } else {
+            $fresh['_fetched_at'] = time();
+        }
+        @file_put_contents($file, (string)json_encode($fresh), LOCK_EX);
+        return $fresh;
     }
 
     private function pauseFile(): string

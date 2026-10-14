@@ -46,6 +46,7 @@ final class Errorgap
      *   release?: string,
      *   ignoreEnvironments?: list<string>,
      *   beforeNotify?: callable,
+     *   remoteSettings?: bool,
      *   captureGlobals?: bool,
      * } $options
      */

@@ -86,6 +86,16 @@ commit variable, a `REVISION` file or the git checkout. After a 429 the SDK
 stops sending (across workers, via a marker in the temp directory) for the
 server's `Retry-After`.
 
+## Remote settings
+
+Errors, performance data and logs can each be switched off for a project in
+errorgap (Project settings › What SDKs send), with no deploy. The SDK reads
+the switches from `GET /api/projects/:slug/config` at most once every ten
+minutes per server (cached in the temp directory) and stops sending what is
+off. If errorgap cannot be reached, everything stays on.
+`'remoteSettings' => false` (or `ERRORGAP_REMOTE_SETTINGS=false`) ignores the
+project's switches.
+
 ## Monolog
 
 ```php

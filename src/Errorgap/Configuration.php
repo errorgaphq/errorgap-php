@@ -48,6 +48,11 @@ final class Configuration
      * @var (callable(array<string, mixed>): (array<string, mixed>|false|null))|null
      */
     public $beforeNotify;
+    /**
+     * Follow the project's settings in errorgap (Project settings › What SDKs
+     * send): stop sending what is switched off there.
+     */
+    public bool $remoteSettings;
 
     /**
      * @param array{
@@ -71,6 +76,7 @@ final class Configuration
      *   release?: string,
      *   ignoreEnvironments?: list<string>,
      *   beforeNotify?: callable,
+     *   remoteSettings?: bool,
      * } $options
      */
     public function __construct(array $options = [])
@@ -107,6 +113,8 @@ final class Configuration
             explode(',', (string)(getenv('ERRORGAP_IGNORE_ENVIRONMENTS') ?: '')),
         ), static fn (string $name): bool => $name !== ''));
         $this->beforeNotify = $options['beforeNotify'] ?? null;
+        $this->remoteSettings = $options['remoteSettings']
+            ?? (strtolower(trim((string)(getenv('ERRORGAP_REMOTE_SETTINGS') ?: ''))) !== 'false');
     }
 
     public function ignoredEnvironment(): bool
