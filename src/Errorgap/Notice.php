@@ -28,6 +28,10 @@ final class Notice
             'root_directory' => $configuration->rootDirectory,
         ];
 
+        if ($configuration->release !== null && $configuration->release !== '') {
+            $defaultContext['release'] = $configuration->release;
+        }
+
         $causes = self::causes($exception);
         if ($causes !== []) {
             $defaultContext['causes'] = $causes;
@@ -39,13 +43,13 @@ final class Notice
             'errors' => [
                 [
                     'type' => $exception::class,
-                    'message' => $exception->getMessage(),
+                    'message' => Filter::string($exception->getMessage(), 8192),
                     'backtrace' => Backtrace::chain($exception, $configuration->rootDirectory),
                 ],
             ],
-            'context' => array_merge($defaultContext, $context),
-            'environment' => $environment,
-            'session' => $session,
+            'context' => array_merge($defaultContext, Filter::clean($context)),
+            'environment' => Filter::clean($environment),
+            'session' => Filter::params($session, $configuration->filterKeys),
             'params' => Filter::params($params, $configuration->filterKeys),
         ];
     }

@@ -11,8 +11,12 @@
     "psr/log": "^1.1 || ^2.0 || ^3.0"
   },
   "require-dev": {
+    "monolog/monolog": "^3.0",
     "phpunit/phpunit": "^10.5",
     "phpstan/phpstan": "^1.10"
+  },
+  "suggest": {
+    "monolog/monolog": "To report error-level log records with Errorgap\\Monolog\\Handler (^3.0)"
   },
   "autoload": {
     "psr-4": { "Errorgap\\": "src/Errorgap/" }
@@ -22,7 +26,7 @@
   },
   "extra": {
     "branch-alias": {
-      "dev-main": "0.6.x-dev"
+      "dev-main": "0.7.x-dev"
     }
   },
   "config": {
